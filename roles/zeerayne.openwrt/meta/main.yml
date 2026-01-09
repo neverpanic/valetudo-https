@@ -1,0 +1,35 @@
+---
+galaxy_info:
+  namespace: zeerayne
+  role_name: openwrt
+  author: Markus Weippert
+  description: Manage OpenWRT without python
+  issue_tracker_url: https://github.com/zeerayne/ansible-openwrt/issues
+  license: GPL-3.0
+  min_ansible_version: '2.4'
+  platforms:
+    - name: GenericLinux
+    - name: OpenWrt
+      versions:
+        - "19.07"
+        - "21.02"
+        - "22.03"
+        - "23.05"
+        - "24.10"
+    # platforms:
+    # - name: LEDE
+    #   versions:
+    #   - 17.01
+    # - name: OpenWRT
+    #   versions:
+    #   - 15.05
+  galaxy_tags:
+    - busybox
+    - lede
+    - openwrt
+    - shell
+    - uci
+dependencies: []
+
+# code: language=yaml tabSize=2
+
