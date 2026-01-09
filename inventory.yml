@@ -1,0 +1,11 @@
+---
+all:
+  hosts:
+    valetudo.lcl.neverpanic.de:
+      ansible_user: root
+      ansible_scp_extra_args: -O
+  children:
+    openwrt:
+      hosts:
+        valetudo.lcl.neverpanic.de:
+          openwrt_install_recommended_packages: false

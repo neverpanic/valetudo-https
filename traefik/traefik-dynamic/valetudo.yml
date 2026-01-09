@@ -1,0 +1,21 @@
+---
+tls:
+  options:
+    default:
+      minVersion: VersionTLS13
+  certificates:
+    - certFile: /data/traefik-certs/valetudo.lcl.neverpanic.de.crt
+      keyFile: /data/traefik-certs/valetudo.lcl.neverpanic.de.key
+http:
+  routers:
+    valetudo:
+      entryPoints:
+        - https
+      rule: "Host(`valetudo.lcl.neverpanic.de`)"
+      tls: {}
+      service: valetudo
+  services:
+    valetudo:
+      loadBalancer:
+        servers:
+          - url: "http://[::1]:80/"

@@ -1,0 +1,146 @@
+#!/usr/bin/env ansible-playbook -i inventory.yml
+---
+- hosts: valetudo.lcl.neverpanic.de
+  gather_facts: false
+  roles:
+    - zeerayne.openwrt
+  tasks:
+    - name: Check traefik version on robot
+      command:
+        cmd: /data/traefik version
+      register: traefik_version_cmd
+      changed_when: false
+      ignore_errors: true
+
+    - name: Parse robot traefik version response
+      when: not traefik_version_cmd.failed
+      ansible.builtin.set_fact:
+        traefik_installed: |
+          {{ traefik_installed
+              | default({})
+              | combine({
+                  (item.split(':')[0] | trim):
+                    (item.split(':')[1] | trim) }) }}
+      with_items:
+        - "{{ traefik_version_cmd.stdout_lines }}"
+
+    - name: Check for latest traefik version
+      local_action: ansible.builtin.command
+      args:
+        argv:
+          - curl
+          - "--silent"
+          - "--fail"
+          - "--location"
+          - "--header"
+          - "Accept: application/vnd.github+json"
+          - "--header"
+          - "X-GitHub-Api-Version: 2022-11-28"
+          - "https://api.github.com/repos/traefik/traefik/releases"
+      register: traefik_latest_cmd
+      changed_when: false
+
+    - name: Parse traefik latest version responses
+      ansible.builtin.set_fact:
+        traefik_latest: |
+          {{ traefik_latest_cmd.stdout
+              | from_json
+              | selectattr('prerelease', 'eq', false)
+              | sort(attribute='name', reverse=true)
+              | first }}
+
+    - name: Determine binary URL for latest traefik version
+      ansible.builtin.set_fact:
+        traefik_latest_asset: |
+          {{ traefik_latest.assets
+              | selectattr('name', 'search', '_linux_arm64')
+              | first }}
+
+    - name: Determine whether traefik is outdated
+      ansible.builtin.set_fact:
+        traefik_outdated: |
+          {{ traefik_version_cmd.failed or
+              (traefik_installed is defined and
+                traefik_installed['Version'] != traefik_latest['name'][1:]) }}
+
+    - name: Copy traefik config file
+      copy:
+        src: "traefik/traefik.yml"
+        dest: "/data/traefik.yml"
+        owner: "root"
+        group: "root"
+        mode: "0644"
+    - name: Create traefik directories
+      file:
+        state: directory
+        path: "{{ item.path }}"
+        owner: "root"
+        group: "root"
+        mode: "{{ item.mode }}"
+      with_items:
+        - path: /data/traefik-dynamic
+          mode: "0755"
+        - path: /data/traefik-certs
+          mode: "0700"
+    - name: Copy traefik dynamic config
+      copy:
+        src: "traefik/traefik-dynamic/valetudo.yml"
+        dest: "/data/traefik-dynamic/valetudo.yml"
+        owner: "root"
+        group: "root"
+        mode: "0644"
+    - name: Enable traefik on startup
+      lineinfile:
+        path: /data/_root_postboot.sh
+        state: present
+        regex: "/data/traefik"
+        insertafter: EOF
+        line: "if [ -f /data/traefik ]; then /data/traefik --configFile=/data/traefik.yml >/dev/null 2>&1 & fi"
+
+    - ansible.builtin.debug:
+        msg: >
+          traefik {{ traefik_installed['Version'] }} is up to date
+      when: traefik_outdated is not defined or not traefik_outdated
+
+    - name: Update traefik if required
+      when: traefik_outdated is defined and traefik_outdated
+      block:
+        - ansible.builtin.debug:
+            msg: >
+              Found traefik {{ traefik_installed['Version'] }}
+              but {{ traefik_latest['name'][1:] }} is current
+          when: traefik_installed is defined
+        - ansible.builtin.debug:
+            msg: >
+              traefik not installed yet, performing initial installation
+          when: traefik_installed is not defined
+        - name: Download new traefik version
+          local_action: ansible.builtin.get_url
+          args:
+            checksum: "{{ traefik_latest_asset['digest'] }}"
+            dest: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest_asset['name'] }}"
+            mode: "0600"
+            url: "{{ traefik_latest_asset['browser_download_url'] }}"
+        - name: Create directory for extraction
+          local_action: ansible.builtin.file
+          args:
+            path: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest['name'] }}"
+            state: directory
+            mode: 0700
+        - name: Extract archive to directory
+          local_action: ansible.builtin.unarchive
+          args:
+            src: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest_asset['name'] }}"
+            dest: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest['name'] }}"
+            remote_src: true
+            creates: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest['name'] }}/traefik"
+        - name: Copy traefik binary to robot
+          copy:
+            src: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest['name'] }}/traefik"
+            dest: /tmp/traefik
+            mode: "0755"
+            owner: "root"
+            group: "root"
+        - name: Install traefik binary to /data
+          command:
+            cmd: install -m 0755 /tmp/traefik /data/traefik
