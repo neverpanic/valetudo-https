@@ -57,26 +57,31 @@
 
     - name: Parse traefik latest version responses
       ansible.builtin.set_fact:
-        traefik_latest: |
+        traefik_latest_version: |-
           {{ traefik_latest_cmd.stdout
               | from_json
               | selectattr('prerelease', 'eq', false)
-              | sort(attribute='name', reverse=true)
-              | first }}
+              | map(attribute='name')
+              | community.general.version_sort
+              | last }}
 
     - name: Determine binary URL for latest traefik version
       ansible.builtin.set_fact:
         traefik_latest_asset: |
-          {{ traefik_latest.assets
-              | selectattr('name', 'search', '_linux_arm64')
-              | first }}
+          {{ (traefik_latest_cmd.stdout
+               | from_json
+               | selectattr('prerelease', 'eq', false)
+               | selectattr('name', 'eq', traefik_latest_version)
+               | first).assets
+             | selectattr('name', 'search', '_linux_arm64')
+             | first }}
 
     - name: Determine whether traefik is outdated
       ansible.builtin.set_fact:
         traefik_outdated: |
           {{ traefik_version_cmd.failed or
               (traefik_installed is defined and
-                traefik_installed['Version'] != traefik_latest['name'][1:]) }}
+                traefik_installed['Version'] != traefik_latest_version[1:]) }}
 
     - name: Copy traefik config file
       copy:
@@ -123,7 +128,7 @@
         - ansible.builtin.debug:
             msg: >
               Found traefik {{ traefik_installed['Version'] }}
-              but {{ traefik_latest['name'][1:] }} is current
+              but {{ traefik_latest_version[1:] }} is current
           when: traefik_installed is defined
         - ansible.builtin.debug:
             msg: >
@@ -139,19 +144,19 @@
         - name: Create directory for extraction
           local_action: ansible.builtin.file
           args:
-            path: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest['name'] }}"
+            path: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest_version }}"
             state: directory
             mode: 0700
         - name: Extract archive to directory
           local_action: ansible.builtin.unarchive
           args:
             src: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest_asset['name'] }}"
-            dest: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest['name'] }}"
+            dest: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest_version }}"
             remote_src: true
-            creates: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest['name'] }}/traefik"
+            creates: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest_version }}/traefik"
         - name: Copy traefik binary to robot
           copy:
-            src: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest['name'] }}/traefik"
+            src: "{{ lookup('env', 'PWD') }}/download/{{ traefik_latest_version }}/traefik"
             dest: /tmp/traefik
             mode: "0755"
             owner: "root"
